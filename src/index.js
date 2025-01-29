@@ -1,8 +1,22 @@
 const MQTTManager = require('./mqtt_manager');
+const XBeeManager = require('./xbee_management');
+const xbee_api = require('xbee-api');
 const dotenv = require('dotenv');
 dotenv.config();
 
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
+
+const XBEE_QTY = 3;
+
+if (!CLIENT_SECRET) {
+    console.error('Missing CLIENT_SECRET in environment variables');
+    process.exit(1);
+}
+
+if (!process.env.SERIAL_PORT) {
+    console.error('Missing SERIAL_PORT in environment variables');
+    process.exit(1);
+}
 
 const SAMPLE_DISPENSE_CONFIG = {
     RATE: 5,  // Per second qty in gram
@@ -13,15 +27,26 @@ const SAMPLE_DISPENSE_CONFIG = {
 
 async function main() {
     const mqttClient = new MQTTManager();
+    const xbeeClient = new XBeeManager();
 
     try {
         await mqttClient.connect();
 
-        // Distribution subscription
+        await xbeeClient.connect();
+        await xbeeClient.sendRemoteNIRequest();
+
+        while (xbeeClient.nodes.length < XBEE_QTY) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
+        await mqttClient.publish(`Gamelle1/remplissage`, {
+            nodes: xbeeClient.nodes
+        });
+
         await mqttClient.subscribe(`feedme/${CLIENT_SECRET}/commands/feeder/dispense`, async (message) => {
             try {
                 // Check amount
-                if (message.amount < SAMPLE_DISPENSE_CONFIG.MIN_AMOUNT || 
+                if (message.amount < SAMPLE_DISPENSE_CONFIG.MIN_AMOUNT ||
                     message.amount > SAMPLE_DISPENSE_CONFIG.MAX_AMOUNT) {
                     console.error('Invalid dispense amount:', message.amount);
                     return;
@@ -45,10 +70,7 @@ async function main() {
             }
         });
 
-        // ==================================================
-        // ==================================================
-
-        // Status update
+        // Status updates
         await mqttClient.publish(`feedme/${CLIENT_SECRET}/statuses/balance_bottom`, {
             status: 'full',
             weight: 100
@@ -59,7 +81,15 @@ async function main() {
         });
 
     } catch (error) {
-        console.error('MQTT Initialization Error:', error);
+        console.error('Initialization Error:', error);
+        // Attempt to disconnect cleanly in case of error
+        try {
+            await mqttClient.disconnect();
+            await xbeeClient.disconnect();
+        } catch (disconnectError) {
+            console.error('Error during cleanup:', disconnectError);
+        }
+        process.exit(1);
     }
 }
 
