@@ -12,8 +12,10 @@ db.serialize(() => {
     db.run(`
         CREATE TABLE IF NOT EXISTS feeders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            name TEXT,
             tenant_id INTEGER,
+            uid TEXT NOT NULL UNIQUE,
+            paired BOOLEAN DEFAULT 0,
             FOREIGN KEY(tenant_id) REFERENCES tenants(id)
         )
     `);
@@ -28,5 +30,8 @@ db.serialize(() => {
         )
     `);
 });
+
+db.run("INSERT OR IGNORE INTO tenants (name) VALUES ('PipenvIsAwesome')");
+db.run("INSERT OR IGNORE INTO tenants (name) VALUES ('PipenvIsAwesome2')");
 
 db.close();
