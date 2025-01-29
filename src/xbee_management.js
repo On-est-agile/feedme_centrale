@@ -89,12 +89,45 @@ class XBeeManager {
                         this.mqttClient.publish(`feedme/${CLIENT_SECRET}/sensors/weight`, { weight });
                     }
                 })
+        } else if (C.FRAME_TYPE.ZIGBEE_RECEIVE_PACKET === frame.type) {
+            const data = frame.data.toString();
+            const address64 = frame.remote64.toString('hex');
+            this.getNodeByAddress(address64)
+                .then((node) => {
+                    console.log('Received data from:', node);
+                    if (node.name === 'Puce') {
+                        console.log('Received data:', data);
+                        try {
+                            let uid = data.split('-')[0].split(':')[1].trim();
+                            uid = uid.replace(/ /g, '');
+                            const isValide = uid.length === 8 ? true : false;
+                            if (isValide) {
+                                db.get("SELECT * FROM feeders WHERE uid = ?", [uid], (err, row) => {
+                                    if (err) {
+                                        console.error('Error fetching feeder:', err);
+                                    } else if (!row) {
+                                        console.log('Feeder not found, publishing to add feeder');
+                                        this.mqttClient.publish(`feedme/${CLIENT_SECRET}/feeders/pending`, { uid });
+                                    } else {
+                                        // Feeding the cat
+                                        console.log('Feeding the cat');
+                                    }
+                                });
+                            } else {
+                                console.log('UID not valid');
+                            }
+                        } catch (error) {
+                            console.error('Error parsing UID:', error);
+                        }
+                    }
+                })
         }
 
         else {
             const frameType = Object.keys(C.FRAME_TYPE).find(key => C.FRAME_TYPE[key] === frame.type);
             if (frameType) {
                 console.log(`Received ${frameType} frame`);
+                // console.log(frame);
             } else {
                 console.log('Received unknown frame:', frame);
             }
