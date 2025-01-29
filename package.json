@@ -10,10 +10,12 @@
     "dotenv": "^16.4.7",
     "mqtt": "^5.10.3",
     "serialport": "^9.2.4",
+    "sqlite3": "^5.1.7",
     "uuid": "^9.0.1",
     "xbee-api": "^0.6.0"
   },
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "init": "node src/init.js"
   }
 }
