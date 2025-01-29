@@ -7,3 +7,6 @@ npm-debug.log
 # Yarn
 yarn-error.log
 yarn.lock
+
+# Logs
+sqlite.db
