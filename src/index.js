@@ -33,26 +33,39 @@ async function main() {
         await mqttClient.connect();
 
         await xbeeClient.connect();
-        await xbeeClient.sendRemoteNIRequest();
+        // await xbeeClient.sendRemoteNIRequest();
+
+        // while (xbeeClient.nodes.length < XBEE_QTY) {
+        //     await new Promise((resolve) => setTimeout(resolve, 1000));
+        // }
 
         while (xbeeClient.nodes.length < XBEE_QTY) {
+            console.log('Waiting for nodes to connect...');
             await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
-        await mqttClient.publish(`Gamelle1/remplissage`, {
+        await mqttClient.publish(`feedme/${CLIENT_SECRET}/statuses/all`, {
             nodes: xbeeClient.nodes
         });
 
+        try {
+            await mqttClient.publish(`feedme/${CLIENT_SECRET}/statuses/balance_bottom`, {
+                status: 'full',
+                weight: 100
+            });
+
+        } catch (error) {
+            console.error('Get balance command error:', error);
+        }
+
         await mqttClient.subscribe(`feedme/${CLIENT_SECRET}/commands/feeder/dispense`, async (message) => {
             try {
-                // Check amount
                 if (message.amount < SAMPLE_DISPENSE_CONFIG.MIN_AMOUNT ||
                     message.amount > SAMPLE_DISPENSE_CONFIG.MAX_AMOUNT) {
                     console.error('Invalid dispense amount:', message.amount);
                     return;
                 }
 
-                // Calculate duration
                 const duration = Math.round((message.amount / SAMPLE_DISPENSE_CONFIG.RATE) * 1000);
 
                 console.log(`Dispensing ${message.amount}g (${duration}ms)`);
@@ -70,7 +83,6 @@ async function main() {
             }
         });
 
-        // Status updates
         await mqttClient.publish(`feedme/${CLIENT_SECRET}/statuses/balance_bottom`, {
             status: 'full',
             weight: 100
@@ -79,6 +91,7 @@ async function main() {
         await mqttClient.publish(`feedme/${CLIENT_SECRET}/statuses/trap_top`, {
             status: 'open'
         });
+
 
     } catch (error) {
         console.error('Initialization Error:', error);
