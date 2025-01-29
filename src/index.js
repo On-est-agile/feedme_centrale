@@ -85,6 +85,22 @@ async function main() {
             }
         });
 
+        await mqttClient.subscribe(`feedme/${CLIENT_SECRET}/feeders/pair`, async (message) => {
+            try {
+                const { uid, name } = message;
+                db.get("SELECT * FROM tenants WHERE name = ?", [CLIENT_SECRET], (err, row) => {
+                    if (err) {
+                        console.error('Error fetching tenant:', err);
+                    } else {
+                        db.run("INSERT INTO feeders (name, tenant_id, uid, paired) VALUES (?, ?, ?, 1)", [name, row.id, uid]);
+                        console.log('Feeder added:', uid);
+                    }
+                });
+            } catch (error) {
+                console.error('Add feeder error:', error);
+            }
+        });
+
         // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['04'], 'Turn on the light');
         // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['05'], 'Turn off the light');
 
