@@ -84,11 +84,31 @@ class XBeeManager {
             this.getNodeByAddress(address64)
                 .then((node) => {
                     if (node.name === 'Balance') {
-                        const weight = frame.analogSamples.AD1;
-                        console.log('Weight:', weight);
-                        this.mqttClient.publish(`feedme/${CLIENT_SECRET}/sensors/weight`, { weight });
+                        db.get("SELECT * FROM nodes WHERE address = ?", address64, (err, row) => {
+                            if (err) {
+                                console.error('Error fetching node:', err);
+                            }
+                            else if (row) {
+                                const feeder = row.feeder_id;
+                                db.get("SELECT * FROM feeders WHERE id = ?", feeder, (err, row) => {
+                                    if (err) {
+                                        console.error('Error fetching feeder:', err);
+                                    } else {
+                                        const amount = frame.analogSamples.AD1;
+                                        db.get("SELECT * FROM tenants WHERE id = ?", row.tenant_id, (err, row) => {
+                                            if (err) {
+                                                console.error('Error fetching tenant:', err);
+                                            } else {
+                                                console.log('Publish to :', `feedme/${row.name}/${feeder}/sensors/balance_bottom`);
+                                                this.mqttClient.publish(`feedme/${row.name}/${feeder}/sensors/balance_bottom`, { amount });
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
                     }
-                })
+                });
         } else if (C.FRAME_TYPE.ZIGBEE_RECEIVE_PACKET === frame.type) {
             const data = frame.data.toString();
             const address64 = frame.remote64.toString('hex');
@@ -106,10 +126,6 @@ class XBeeManager {
                                     if (err) {
                                         console.error('Error fetching feeder:', err);
                                     }
-                                    // else if (!row) {
-                                    //     console.log('Feeder not found, publishing to add feeder');
-                                    //     this.mqttClient.publish(`feedme/${CLIENT_SECRET}/feeders/pending`, { uid });
-                                    // }
                                     else {
                                         db.get("SELECT * FROM nodes WHERE address = ?", address64, (err, row) => {
                                             if (err) {
