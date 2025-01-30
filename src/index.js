@@ -105,6 +105,16 @@ async function setupTenantSubscriptions(mqttClient, xbeeClient) {
                         console.error(`Dispense command error for tenant ${tenant.name}:`, error);
                     }
                 })
+
+                await mqttClient.subscribe(`feedme/${tenant.name}/feeders/${feeder.id}/rename`, async (message) => {
+                    try {
+                        const { name } = message;
+                        db.run("UPDATE feeders SET name = ? WHERE id = ? AND tenant_id = ?",
+                            [name, feeder.id, tenant.id]);
+                    } catch (error) {
+                        console.error(`Rename feeder error for tenant ${tenant.name}:`, error);
+                    }
+                });
             };
 
             await mqttClient.subscribe(`feedme/${tenant.name}/feeders/add`, async (message) => {
