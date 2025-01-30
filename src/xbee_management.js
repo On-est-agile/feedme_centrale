@@ -135,13 +135,41 @@ class XBeeManager {
                                                     if (err) {
                                                         console.error('Error fetching feeder:', err);
                                                     } else {
+                                                        let catName = '';
                                                         if (row.uid === uid) {
                                                             console.log('Feeding the cat');
-                                                            this.sendRemoteATCommand(address64, 'D0', [0x05], 'Feeding the cat');
-                                                        } else {
-                                                            console.log('Wrong cat');
+                                                            catName = row.name
                                                         }
+                                                        else {
+                                                            catName = 'Mauvais chat';
+                                                        }
+                                                        db.get("SELECT * FROM nodes WHERE feeder_id = ? AND name = ?", row.id, 'Trappe', (err, row) => {
+                                                            if (err) {
+                                                                console.error('Error fetching node:', err);
+                                                            }
+                                                            else {
+                                                                const trappeAddress64 = row.address;
+                                                                console.log('Trappe address:', trappeAddress64);
+                                                                const data = `DEBUTNOM | ${catName} | FINNOM`;
+                                                                const frame = {
+                                                                    type: C.FRAME_TYPE.ZIGBEE_TRANSMIT_REQUEST,
+                                                                    destination64: trappeAddress64,
+                                                                    data: data
+                                                                };
+
+                                                                try {
+                                                                    this.send(frame);
+                                                                    console.log('Feed command sent to trappe:', trappeAddress64);
+                                                                } catch (error) {
+                                                                    console.error('Error sending feed command:', error);
+                                                                }
+                                                            }
+                                                        });
                                                     }
+                                                    // else {
+                                                    //     console.log('Wrong cat');
+                                                    // }
+                                                    // }
                                                 });
                                             }
                                         }
