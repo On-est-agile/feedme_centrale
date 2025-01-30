@@ -14,7 +14,7 @@ db.serialize(() => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
             tenant_id INTEGER,
-            uid TEXT NOT NULL UNIQUE,
+            uid TEXT UNIQUE,
             paired BOOLEAN DEFAULT 0,
             FOREIGN KEY(tenant_id) REFERENCES tenants(id)
         )

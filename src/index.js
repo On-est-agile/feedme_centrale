@@ -5,12 +5,7 @@ const xbee_api = require('xbee-api');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
-
-if (!CLIENT_SECRET) {
-    console.error('Missing CLIENT_SECRET in environment variables');
-    process.exit(1);
-}
+const C = xbee_api.constants;
 
 if (!process.env.SERIAL_PORT) {
     console.error('Missing SERIAL_PORT in environment variables');
@@ -20,10 +15,14 @@ if (!process.env.SERIAL_PORT) {
 const db = new sqlite3.Database('./sqlite.db');
 
 const SAMPLE_DISPENSE_CONFIG = {
-    RATE: 5,  // Per second qty in gram
-    MAX_AMOUNT: 200,  // gmax per dispense
-    MIN_AMOUNT: 10,   // gmin per dispense
-    SCHEDULE: [] // How to define ? Maybe SQLITE storage by CLIENT_SECRET ?
+    SCHEDULE: [],
+    AMOUNT: {
+        '1': 1.3,
+        '2': 2,
+        '3': 2.3,
+        '4': 2.6,
+        '5': 3,
+    }
 };
 
 async function fetchTenants() {
@@ -56,6 +55,142 @@ async function publishTenantFeeders(mqttClient) {
     }
 }
 
+// get address64 of the node by feeder.id
+async function getAddress64OfNodes(feederId) {
+    return new Promise((resolve, reject) => {
+        const query = `
+      SELECT nodes.address
+      FROM nodes
+      INNER JOIN feeders ON nodes.feeder_id = feeders.id
+      WHERE feeders.id = ? AND nodes.name = 'Porte'
+    `;
+
+        db.all(query, [feederId], (err, rows) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            if (rows.length === 0) {
+                reject(new Error('No node found for feeder'));
+                return;
+            }
+
+            resolve(rows[0].address);
+        });
+    });
+}
+
+async function setupTenantSubscriptions(mqttClient, xbeeClient) {
+    try {
+        const tenants = await fetchTenants();
+
+        for (const tenant of tenants) {
+            for (const feeder of await fetchFeeders(tenant.id)) {
+                await mqttClient.subscribe(`feedme/${tenant.name}/${feeder.id}/commands/feeder/dispense`, async (message) => {
+                    try {
+
+                        const duration = Math.round((SAMPLE_DISPENSE_CONFIG.AMOUNT[message.amount]) * 1000);
+
+                        let address64 = await getAddress64OfNodes(feeder.id);
+
+
+                        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['04'], 'Open top trap');
+                        xbeeClient.sendRemoteATCommand(address64, 'D0', ['04'], `Open top trap for ${message.amount} dose(s)`);
+                        await new Promise((resolve) => setTimeout(resolve, duration));
+                        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['05'], 'Close top trap');
+                        xbeeClient.sendRemoteATCommand(address64, 'D0', ['05'], `Close top trap for ${message.amount} dose(s)`);
+
+                    } catch (error) {
+                        console.error(`Dispense command error for tenant ${tenant.name}:`, error);
+                    }
+                })
+            };
+
+            await mqttClient.subscribe(`feedme/${tenant.name}/feeders/add`, async (message) => {
+                try {
+                    const { name } = message;
+                    db.get("SELECT * FROM feeders WHERE name = ? AND tenant_id = ?", [name, tenant.id], (err, row) => {
+                        if (err) {
+                            console.error(`Error fetching feeder for tenant ${tenant.name}:`, err);
+                        } else if (!row) {
+                            db.run("INSERT INTO feeders (name, tenant_id, paired) VALUES (?, ?, 0)",
+                                [name, tenant.id]);
+                            console.log(`Feeder added for tenant ${tenant.name}:`, name);
+                        } else {
+                            console.log(`Feeder already exists for tenant ${tenant.name}:`, name);
+                        }
+                    });
+                } catch (error) {
+                    console.error(`Pending feeder error for tenant ${tenant.name}:`, error);
+                }
+            });
+
+            await mqttClient.subscribe(`feedme/${tenant.name}/feeders/askForPeer`, async (message) => {
+                try {
+                    const { name } = message;
+                    console.log(`Asking for peer for tenant ${tenant.name}:`, name);
+                    db.get("SELECT * FROM feeders WHERE name = ? AND tenant_id = ?", [name, tenant.id], (err, row) => {
+                        if (err) {
+                            console.error(`Error fetching feeder for tenant ${tenant.name}:`, err);
+                        } else if (row) {
+                            console.log(`1 Feeder found for tenant ${tenant.name}:`, name);
+                            if (!row.paired) {
+                                console.log(`2 Feeder not paired for tenant ${tenant.name}:`, name);
+                                if (name === 'Miaou1') {
+                                    console.log(`3 Asking for peer for tenant ${tenant.name}:`, name);
+                                    xbeeClient.addListener(C.FRAME_TYPE.ZIGBEE_RECEIVE_PACKET, async (frame) => {
+                                        const node = xbeeClient.getNodeByAddress(frame.remote64);
+                                        const data = frame.data.toString();
+                                        if (node && node.name === 'Puce') {
+                                            try {
+                                                let uid = data.split('-')[0].split(':')[1].trim();
+                                                uid = uid.replace(/ /g, '');
+                                                const isValide = uid.length === 8 ? true : false;
+                                                if (isValide) {
+                                                    await new Promise((resolve, reject) => {
+                                                        db.run(`UPDATE feeders SET uid = ?, paired = 1, WHERE name = ?`,
+                                                            [node.address64, name],
+                                                            (err) => {
+                                                                if (err) reject(err);
+                                                                else resolve();
+                                                            }
+                                                        );
+                                                    });
+
+                                                    console.log(`Paired feeder ${name} with node Puce (${node.address64})`);
+
+                                                    await mqttClient.publish(`feedme/${tenant.name}/feeders/paired`, {
+                                                        feeder: name,
+                                                        uid: node.address64,
+                                                    });
+
+                                                    xbeeClient.removeListener(C.FRAME_TYPE.ZIGBEE_RECEIVE_PACKET);
+                                                } else {
+                                                    console.log('UID not valid');
+                                                }
+                                            } catch (error) {
+                                                console.error(`Error pairing feeder ${name}:`, error);
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        } else {
+                            console.log(`Feeder not found for tenant ${tenant.name}:`, name);
+                        }
+                    });
+                } catch (error) {
+                    console.error(`Ask for peer error for tenant ${tenant.name}:`, error);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error setting up tenant subscriptions:', error);
+        throw error;
+    }
+}
+
 async function main() {
     const mqttClient = new MQTTManager();
     const xbeeClient = new XBeeManager(mqttClient);
@@ -64,45 +199,8 @@ async function main() {
         await mqttClient.connect();
         await xbeeClient.connect();
 
+        await setupTenantSubscriptions(mqttClient, xbeeClient);
         setInterval(() => publishTenantFeeders(mqttClient), 10000);
-
-        await mqttClient.subscribe(`feedme/${CLIENT_SECRET}/commands/feeder/dispense`, async (message) => {
-            try {
-                if (message.amount < SAMPLE_DISPENSE_CONFIG.MIN_AMOUNT ||
-                    message.amount > SAMPLE_DISPENSE_CONFIG.MAX_AMOUNT) {
-                    console.error('Invalid dispense amount:', message.amount);
-                    return;
-                }
-
-                const duration = Math.round((message.amount / SAMPLE_DISPENSE_CONFIG.RATE) * 1000);
-                console.log(`Dispensing ${message.amount}g (${duration}ms)`);
-
-                // TO-DO : implement opening command with motor XBees
-                // No implementation for now because no motors are connected
-
-            } catch (error) {
-                console.error('Dispense command error:', error);
-            }
-        });
-
-        await mqttClient.subscribe(`feedme/${CLIENT_SECRET}/feeders/pair`, async (message) => {
-            try {
-                const { uid, name } = message;
-                db.get("SELECT * FROM tenants WHERE name = ?", [CLIENT_SECRET], (err, row) => {
-                    if (err) {
-                        console.error('Error fetching tenant:', err);
-                    } else {
-                        db.run("INSERT INTO feeders (name, tenant_id, uid, paired) VALUES (?, ?, ?, 1)", [name, row.id, uid]);
-                        console.log('Feeder added:', uid);
-                    }
-                });
-            } catch (error) {
-                console.error('Add feeder error:', error);
-            }
-        });
-
-        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['04'], 'Turn on the light');
-        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['05'], 'Turn off the light');
 
     } catch (error) {
         console.error('Initialization Error:', error);

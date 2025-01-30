@@ -94,62 +94,84 @@ class XBeeManager {
             const address64 = frame.remote64.toString('hex');
             this.getNodeByAddress(address64)
                 .then((node) => {
-                    console.log('Received data from:', node);
                     if (node.name === 'Puce') {
-                        console.log('Received data:', data);
+                        // console.log('Received address:', address64);
                         try {
                             let uid = data.split('-')[0].split(':')[1].trim();
                             uid = uid.replace(/ /g, '');
                             const isValide = uid.length === 8 ? true : false;
                             if (isValide) {
-                                db.get("SELECT * FROM feeders WHERE uid = ?", [uid], (err, row) => {
+                                console.log('UID:', uid);
+                                db.get("SELECT * FROM feeders WHERE uid = ?", uid, (err, row) => {
                                     if (err) {
                                         console.error('Error fetching feeder:', err);
-                                    } else if (!row) {
-                                        console.log('Feeder not found, publishing to add feeder');
-                                        this.mqttClient.publish(`feedme/${CLIENT_SECRET}/feeders/pending`, { uid });
-                                    } else {
-                                        // Feeding the cat
-                                        console.log('Feeding the cat');
+                                    }
+                                    // else if (!row) {
+                                    //     console.log('Feeder not found, publishing to add feeder');
+                                    //     this.mqttClient.publish(`feedme/${CLIENT_SECRET}/feeders/pending`, { uid });
+                                    // }
+                                    else {
+                                        db.get("SELECT * FROM nodes WHERE address = ?", address64, (err, row) => {
+                                            if (err) {
+                                                console.error('Error fetching node:', err);
+                                            } else {
+                                                db.get("SELECT * FROM feeders WHERE id = ?", row.feeder_id, (err, row) => {
+                                                    if (err) {
+                                                        console.error('Error fetching feeder:', err);
+                                                    } else {
+                                                        if (row.uid === uid) {
+                                                            console.log('Feeding the cat');
+                                                            this.sendRemoteATCommand(address64, 'D0', [0x05], 'Feeding the cat');
+                                                        } else {
+                                                            console.log('Wrong cat');
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        );
+
                                     }
                                 });
                             } else {
-                                console.log('UID not valid');
+                                // console.log('UID not valid');
                             }
                         } catch (error) {
-                            console.error('Error parsing UID:', error);
+                            // console.error('Error parsing data:', error);
                         }
                     }
                 })
+        } else if (C.FRAME_TYPE.REMOTE_COMMAND_RESPONSE === frame.type) {
+            // console.log('Remote AT Command Response:', frame);
         }
 
         else {
             const frameType = Object.keys(C.FRAME_TYPE).find(key => C.FRAME_TYPE[key] === frame.type);
             if (frameType) {
                 console.log(`Received ${frameType} frame`);
-                // console.log(frame);
+                console.log(frame);
             } else {
                 console.log('Received unknown frame:', frame);
             }
         }
     }
 
-    async sendRemoteATCommand(destinationType, command, commandParameters, description = '') {
+    async sendRemoteATCommand(destination, command, commandParameters, description = '') {
         try {
-            const node = await this.getNodeFromDB(destinationType);
-            if (!node) {
-                console.error('Node not found:', destinationType);
-                return;
-            }
-            const destination64 = node.address;
-            if (!destination64) {
-                console.error('Node address not found:', destinationType);
-                return;
-            }
+            // const node = await this.getNodeFromDB(destinationType);
+            // if (!node) {
+            //     console.error('Node not found:', destination);
+            //     return;
+            // }
+            // const destination64 = node.address;
+            // if (!destination64) {
+            //     console.error('Node address not found:', destinationType);
+            //     return;
+            // }
 
             const remoteATCommand = {
                 type: C.FRAME_TYPE.REMOTE_AT_COMMAND_REQUEST,
-                destination64: destination64,
+                destination64: destination,
                 command: command,
                 commandParameter: commandParameters
             };
@@ -183,22 +205,67 @@ class XBeeManager {
         });
     }
 
-    async writeNode(nodeType, address64) {
+    // async writeNode(nodeType, address64) {
+    //     const existingNode = await this.getNodeFromDB(nodeType);
+    //     if (existingNode) {
+    //         return new Promise((resolve, reject) => {
+    //             db.run("UPDATE nodes SET address = ? WHERE name = ?", [address64, nodeType], (err) => {
+    //                 if (err) reject(err);
+    //                 else resolve();
+    //             });
+    //         });
+    //     } else {
+    //         return new Promise((resolve, reject) => {
+    //             db.run("INSERT INTO nodes (name, address, feeder_id) VALUES (?, ?, 1)", [nodeType, address64], (err) => {
+    //                 if (err) reject(err);
+    //                 else resolve();
+    //             });
+    //         });
+    //     }
+    // }
+
+    async writeNode(nodeType, address64, maxRetries = 5, delay = 100) {
+        const retry = async (operation, retriesLeft) => {
+            try {
+                return await operation();
+            } catch (error) {
+                // SQLite busy error code
+                if (error.errno === 5 && retriesLeft > 0) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return retry(operation, retriesLeft - 1);
+                }
+                throw error;
+            }
+        };
+
         const existingNode = await this.getNodeFromDB(nodeType);
+
         if (existingNode) {
-            return new Promise((resolve, reject) => {
-                db.run("UPDATE nodes SET address = ? WHERE name = ?", [address64, nodeType], (err) => {
-                    if (err) reject(err);
-                    else resolve();
+            return retry(() => {
+                return new Promise((resolve, reject) => {
+                    db.run(
+                        "UPDATE nodes SET address = ? WHERE name = ?",
+                        [address64, nodeType],
+                        (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        }
+                    );
                 });
-            });
+            }, maxRetries);
         } else {
-            return new Promise((resolve, reject) => {
-                db.run("INSERT INTO nodes (name, address, feeder_id) VALUES (?, ?, 1)", [nodeType, address64], (err) => {
-                    if (err) reject(err);
-                    else resolve();
+            return retry(() => {
+                return new Promise((resolve, reject) => {
+                    db.run(
+                        "INSERT INTO nodes (name, address, feeder_id) VALUES (?, ?, 1)",
+                        [nodeType, address64],
+                        (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        }
+                    );
                 });
-            });
+            }, maxRetries);
         }
     }
 
