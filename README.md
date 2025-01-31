@@ -1,26 +1,42 @@
-# feedme_centrale
+# Centrale de FeedMe
 
 ## Installation
 ```
 yarn
+yarn run init
 yarn run start
 ```
+## Publish Topics
 
-## Nomencalture
-For sensors :
-`feedme/sensors/{device_id}/{sensor_type}`
-    - Sample :
-        `feedme/{secret}/sensors/balance_bottom/weight`
+### Tenant Feeders List
+- **Topic:** `feedme/{tenant_name}/feeders`
+- **Payload:** `{ feeders: [] }`
+- **Description:** Broadcasts list of feeders for a specific tenant
+- **Frequency:** Every 10 seconds
 
-For commands :
-`feedme/commands/{device_id}/{action}`
-    - Sample :
-        `feedme/{secret}/commands/trap_top/open`
-        `feedme/{secret}/commands/trap_bottom/open`
+### Tenant Feeders List
+- **Topic:** `feedme/{tenant_name}/{feeder}/sensors/balance_bottom`
+- **Payload:** `{ amount: number }`
+- **Description:** Broadcasts pressure sensor reading from bottom of feeder
+- **Frequency:** Each sensor reading
 
-For statuses :
-`feedme/statuses/{device_id}`
-    - Sample :
-        `feedme/{secret}/statuses/trap_top`
-        `feedme/{secret}/statuses/trap_bottom`
-        `feedme/{secret}/statuses/balance_bottom`
+## Subscribe Topics
+
+### Feeder Dispense Command
+- **Topic:** `feedme/{tenant_name}/{feeder_id}/commands/feeder/dispense`
+- **Payload:** `{ amount: number }`
+- **Actions:**
+  - Open trap
+  - Dispense food
+  - Close trap
+
+### Feeder Rename
+- **Topic:** `feedme/{tenant_name}/feeders/{feeder_id}/rename`
+- **Payload:** `{ name: string }`
+- **Action:** Update feeder name in database
+
+## Configuration
+- Default MQTT Broker: Configured via environment variables
+- Default Port: 1883
+- Connection Timeout: 5 seconds
+- Reconnect Period: 1 second
