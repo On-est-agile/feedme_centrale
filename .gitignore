@@ -1,0 +1,12 @@
+node_modules
+build
+npm-debug.log
+.env
+.DS_Store
+
+# Yarn
+yarn-error.log
+yarn.lock
+
+# Logs
+sqlite.db
