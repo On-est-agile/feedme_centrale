@@ -10,6 +10,10 @@ const BROADCAST_ADDRESS = "FFFFFFFFFFFFFFFF";
 const db = new sqlite3.Database('./sqlite.db');
 
 class XBeeManager {
+    /**
+     * Initializes XBee communication manager
+     * @param {Object} mqttClient - MQTT client for publishing sensor data
+     */
     constructor(mqttClient) {
         this.serialPort = null;
         this.xbeeAPI = null;
@@ -20,6 +24,10 @@ class XBeeManager {
         this.nodes = [];
     }
 
+    /**
+     * Establishes connection to XBee device via serial port
+     * @returns {Promise} Resolves when serial port is successfully opened
+     */
     connect() {
         return new Promise((resolve, reject) => {
             try {
@@ -61,6 +69,11 @@ class XBeeManager {
         });
     }
 
+    /**
+     * Internal method to process incoming XBee frames
+     * Handles different frame types and triggers appropriate actions
+     * @param {Object} frame - Received XBee communication frame
+     */
     _handleIncomingFrame(frame) {
         for (const [type, handler] of this.listeners) {
             if (frame.type === type) {
@@ -79,6 +92,10 @@ class XBeeManager {
             this.writeNode(nodeIdentifier, address64);
         }
 
+        else if (C.FRAME_TYPE.ZIGBEE_TRANSMIT_STATUS === frame.type) {
+            // console.log('Transmit status:', frame);
+        }
+
         else if (C.FRAME_TYPE.ZIGBEE_IO_DATA_SAMPLE_RX === frame.type) {
             const address64 = frame.remote64.toString('hex');
             this.getNodeByAddress(address64)
@@ -95,6 +112,7 @@ class XBeeManager {
                                         console.error('Error fetching feeder:', err);
                                     } else {
                                         const amount = frame.analogSamples.AD1;
+                                        console.log('Balance:', amount);
                                         db.get("SELECT * FROM tenants WHERE id = ?", row.tenant_id, (err, row) => {
                                             if (err) {
                                                 console.error('Error fetching tenant:', err);
@@ -200,19 +218,16 @@ class XBeeManager {
         }
     }
 
+    /**
+     * Sends a remote AT command to a specific XBee device
+     * @param {string} destination - 64-bit destination address
+     * @param {string} command - AT command to send
+     * @param {Array} commandParameters - Parameters for the command
+     * @param {string} [description=''] - Optional description of command
+     * @returns {Promise} Resolves when command is sent
+     */
     async sendRemoteATCommand(destination, command, commandParameters, description = '') {
         try {
-            // const node = await this.getNodeFromDB(destinationType);
-            // if (!node) {
-            //     console.error('Node not found:', destination);
-            //     return;
-            // }
-            // const destination64 = node.address;
-            // if (!destination64) {
-            //     console.error('Node address not found:', destinationType);
-            //     return;
-            // }
-
             const remoteATCommand = {
                 type: C.FRAME_TYPE.REMOTE_AT_COMMAND_REQUEST,
                 destination64: destination,
@@ -231,6 +246,12 @@ class XBeeManager {
         }
     }
 
+
+    /**
+     * Retrieves node information from database by node type
+     * @param {string} nodeType - Name of the node
+     * @returns {Promise} Resolves with node address
+     */
     async getNodeFromDB(nodeType) {
         return new Promise((resolve, reject) => {
             db.get("SELECT address FROM nodes WHERE name = ?", [nodeType], (err, row) => {
@@ -240,6 +261,11 @@ class XBeeManager {
         });
     }
 
+    /**
+     * Retrieves node name from database by 64-bit address
+     * @param {string} address64 - 64-bit node address
+     * @returns {Promise} Resolves with node name
+     */
     async getNodeByAddress(address64) {
         return new Promise((resolve, reject) => {
             db.get("SELECT name FROM nodes WHERE address = ?", [address64], (err, row) => {
@@ -249,25 +275,15 @@ class XBeeManager {
         });
     }
 
-    // async writeNode(nodeType, address64) {
-    //     const existingNode = await this.getNodeFromDB(nodeType);
-    //     if (existingNode) {
-    //         return new Promise((resolve, reject) => {
-    //             db.run("UPDATE nodes SET address = ? WHERE name = ?", [address64, nodeType], (err) => {
-    //                 if (err) reject(err);
-    //                 else resolve();
-    //             });
-    //         });
-    //     } else {
-    //         return new Promise((resolve, reject) => {
-    //             db.run("INSERT INTO nodes (name, address, feeder_id) VALUES (?, ?, 1)", [nodeType, address64], (err) => {
-    //                 if (err) reject(err);
-    //                 else resolve();
-    //             });
-    //         });
-    //     }
-    // }
-
+    /**
+     * Writes or updates node information in database
+     * Implements retry mechanism for SQLite database operations
+     * @param {string} nodeType - Name of the node
+     * @param {string} address64 - 64-bit node address
+     * @param {number} [maxRetries=5] - Maximum retry attempts
+     * @param {number} [delay=100] - Delay between retries in milliseconds
+     * @returns {Promise} Resolves when node is written/updated
+     */
     async writeNode(nodeType, address64, maxRetries = 5, delay = 100) {
         const retry = async (operation, retriesLeft) => {
             try {
@@ -313,6 +329,11 @@ class XBeeManager {
         }
     }
 
+    /**
+     * Sends an XBee frame through serial port
+     * @param {Object} frame - XBee frame to send
+     * @returns {Promise} Resolves when frame is sent
+     */
     send(frame) {
         return new Promise((resolve, reject) => {
             if (!this.xbeeAPI || !this.serialPort) {
@@ -329,14 +350,27 @@ class XBeeManager {
         });
     }
 
+    /**
+     * Adds a listener for a specific frame type
+     * @param {number} frameType - XBee frame type to listen for
+     * @param {Function} callback - Callback function to handle the frame
+     */
     addListener(frameType, callback) {
         this.listeners.set(frameType, callback);
     }
 
+    /**
+     * Removes a listener for a specific frame type
+     * @param {number} frameType - XBee frame type to remove listener for
+     */
     removeListener(frameType) {
         this.listeners.delete(frameType);
     }
 
+    /**
+     * Disconnects from XBee device and closes serial port
+     * @returns {Promise} Resolves when disconnection is complete
+     */
     disconnect() {
         return new Promise((resolve, reject) => {
             if (this.serialPort) {

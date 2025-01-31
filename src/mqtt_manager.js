@@ -3,6 +3,10 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 class MQTTManager {
+    /**
+     * Initializes MQTT communication manager
+     * Configures broker connection settings from environment variables
+     */
     constructor() {
         dotenv.config();
 
@@ -19,9 +23,14 @@ class MQTTManager {
         this.client = null;
     }
 
+    /**
+     * Establishes connection to MQTT broker
+     * Sets up event listeners for connection, errors, and incoming messages
+     * @returns {Promise} Resolves with MQTT client on successful connection
+     */
     connect() {
         const connectionUrl = `mqtt://${this.broker}:${this.port}`;
-        
+
         return new Promise((resolve, reject) => {
             try {
                 this.client = mqtt.connect(connectionUrl, this.clientOptions);
@@ -38,7 +47,7 @@ class MQTTManager {
 
                 this.client.on('message', (topic, message) => {
                     const handler = this.subscriptions.get(topic);
-                    
+
                     if (handler) {
                         try {
                             const parsedMessage = JSON.parse(message.toString());
@@ -55,6 +64,12 @@ class MQTTManager {
         });
     }
 
+    /**
+     * Publishes a message to a specific MQTT topic
+     * @param {string} topic - MQTT topic to publish to
+     * @param {Object} payload - Message payload to send
+     * @returns {Promise} Resolves when message is published successfully
+     */
     publish(topic, payload) {
         return new Promise((resolve, reject) => {
             if (!this.client) {
@@ -74,7 +89,12 @@ class MQTTManager {
             });
         });
     }
-
+    /**
+     * Subscribes to an MQTT topic and registers a callback handler
+     * @param {string} topic - MQTT topic to subscribe to
+     * @param {Function} callback - Handler function for received messages
+     * @returns {Promise} Resolves when subscription is successful
+     */
     subscribe(topic, callback) {
         return new Promise((resolve, reject) => {
             if (!this.client) {
@@ -95,6 +115,11 @@ class MQTTManager {
         });
     }
 
+    /**
+     * Disconnects from MQTT broker
+     * Clears client and subscriptions
+     * @returns {Promise} Resolves when disconnection is complete
+     */
     disconnect() {
         return new Promise((resolve, reject) => {
             if (this.client) {

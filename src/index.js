@@ -25,6 +25,10 @@ const SAMPLE_DISPENSE_CONFIG = {
     }
 };
 
+/**
+ * Retrieves all tenants from the database
+ * @returns {Promise<Array>} List of tenant records
+ */
 async function fetchTenants() {
     return new Promise((resolve, reject) => {
         db.all("SELECT * FROM tenants", (err, rows) => {
@@ -34,6 +38,11 @@ async function fetchTenants() {
     });
 }
 
+/**
+ * Retrieves feeders for a specific tenant
+ * @param {number} tenantId - ID of the tenant
+ * @returns {Promise<Array>} List of feeder records for the tenant
+ */
 async function fetchFeeders(tenantId) {
     return new Promise((resolve, reject) => {
         db.all("SELECT * FROM feeders WHERE tenant_id = ?", [tenantId], (err, rows) => {
@@ -43,6 +52,10 @@ async function fetchFeeders(tenantId) {
     });
 }
 
+/**
+ * Publishes feeder information for all tenants via MQTT
+ * @param {MQTTManager} mqttClient - MQTT client for publishing
+ */
 async function publishTenantFeeders(mqttClient) {
     try {
         const tenants = await fetchTenants();
@@ -55,7 +68,11 @@ async function publishTenantFeeders(mqttClient) {
     }
 }
 
-// get address64 of the node by feeder.id
+/**
+ * Retrieves the 64-bit address of a node associated with a specific feeder
+ * @param {number} feederId - ID of the feeder
+ * @returns {Promise<string>} 64-bit node address
+ */
 async function getAddress64OfNodes(feederId) {
     return new Promise((resolve, reject) => {
         const query = `
@@ -81,6 +98,12 @@ async function getAddress64OfNodes(feederId) {
     });
 }
 
+/**
+ * Sets up MQTT subscriptions for tenant-specific commands and actions
+ * Handles feeder dispensing, renaming, addition, and pairing
+ * @param {MQTTManager} mqttClient - MQTT client for subscriptions
+ * @param {XBeeManager} xbeeClient - XBee client for device communication
+ */
 async function setupTenantSubscriptions(mqttClient, xbeeClient) {
     try {
         const tenants = await fetchTenants();
@@ -95,10 +118,8 @@ async function setupTenantSubscriptions(mqttClient, xbeeClient) {
                         let address64 = await getAddress64OfNodes(feeder.id);
 
 
-                        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['04'], 'Open top trap');
                         xbeeClient.sendRemoteATCommand(address64, 'D0', ['04'], `Open top trap for ${message.amount} dose(s)`);
                         await new Promise((resolve) => setTimeout(resolve, duration));
-                        // xbeeClient.sendRemoteATCommand('Porte', 'D0', ['05'], 'Close top trap');
                         xbeeClient.sendRemoteATCommand(address64, 'D0', ['05'], `Close top trap for ${message.amount} dose(s)`);
 
                     } catch (error) {
